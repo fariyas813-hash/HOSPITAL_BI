@@ -206,7 +206,7 @@ def setup_database_if_empty():
 # ---------------------------------------------------------
 @app.route("/")
 def dashboard():
-    return render_template("advanced_dashboard.html")
+    return render_template("index.html")
 
 
 # ---------------------------------------------------------
