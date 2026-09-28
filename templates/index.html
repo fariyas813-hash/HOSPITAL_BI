@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediCore - Enterprise Hospital BI Dashboard</title>
+  
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+  <!-- Top Executive Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-wrap justify-between items-center shadow-lg">
+    <div class="flex items-center space-x-3">
+      <div class="h-10 w-10 bg-indigo-600/20 border border-indigo-500/40 rounded-xl flex items-center justify-center text-indigo-400 font-bold text-lg shadow-inner">
+        <i class="fa-solid fa-hospital"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          MediCore Analytics 
+          <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Live BI Engine</span>
+        </h1>
+        <p class="text-xs text-slate-400">Clinical Resource Tracking, Capacity Alerts & Predictive Forecasting</p>
+      </div>
+    </div>
+
+    <!-- Controls & Actions -->
+    <div class="flex flex-wrap items-center gap-3 mt-3 sm:mt-0">
+      
+      <!-- Department Selector -->
+      <div class="relative">
+        <select id="departmentFilter" onchange="loadDashboard()" class="bg-slate-800 border border-slate-700 text-xs font-semibold rounded-lg px-3 py-2 text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none pr-8 cursor-pointer">
+          <option value="All">All Departments</option>
+          <option value="ICU">ICU</option>
+          <option value="Cardiology">Cardiology</option>
+          <option value="General Medicine">General Medicine</option>
+          <option value="Neurology">Neurology</option>
+          <option value="Orthopedics">Orthopedics</option>
+          <option value="Pediatrics">Pediatrics</option>
+        </select>
+        <i class="fa-solid fa-chevron-down absolute right-3 top-3 text-[10px] text-slate-400 pointer-events-none"></i>
+      </div>
+
+      <!-- Download Sample Format -->
+      <button onclick="downloadSampleCSV()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-lg text-slate-300 flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-download text-slate-400"></i> Sample CSV
+      </button>
+
+      <!-- Upload Dataset -->
+      <input type="file" id="fileInput" accept=".csv, .xlsx, .xls" class="hidden" onchange="uploadDataset(event)">
+      <button onclick="document.getElementById('fileInput').click()" class="bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold px-3 py-2 rounded-lg text-white flex items-center gap-2 shadow-md transition">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Dataset
+      </button>
+
+      <!-- Print / Export -->
+      <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-lg text-slate-200 flex items-center gap-2 transition">
+        <i class="fa-solid fa-file-export text-slate-400"></i> PDF
+      </button>
+
+    </div>
+  </header>
+
+  <!-- Live Status Notification Banner -->
+  <div id="uploadToast" class="hidden max-w-[1600px] w-full mx-auto mt-4 px-6">
+    <div id="uploadToastContent" class="p-3.5 rounded-xl border text-xs font-medium flex justify-between items-center shadow-lg">
+      <span id="uploadToastMsg" class="flex items-center gap-2">Ready</span>
+      <button onclick="document.getElementById('uploadToast').classList.add('hidden')" class="text-slate-400 hover:text-white px-2">✕</button>
+    </div>
+  </div>
+
+  <!-- Main Analytics Grid -->
+  <main class="flex-1 p-6 space-y-6 max-w-[1600px] w-full mx-auto">
+
+    <!-- KPI Metric Cards -->
+    <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Total Patients</div>
+        <div id="kpi-total-patients" class="text-2xl font-extrabold text-white mt-1">--</div>
+        <div class="text-[11px] text-emerald-400 mt-1"><i class="fa-solid fa-database"></i> Registered DB</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Currently In</div>
+        <div id="kpi-admitted" class="text-2xl font-extrabold text-blue-400 mt-1">--</div>
+        <div class="text-[11px] text-blue-400/80 mt-1"><i class="fa-solid fa-bed-pulse"></i> Inpatient load</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Available Beds</div>
+        <div id="kpi-available-beds" class="text-2xl font-extrabold text-emerald-400 mt-1">--</div>
+        <div class="text-[11px] text-emerald-400/80 mt-1"><i class="fa-solid fa-circle-check"></i> Ready to assign</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Occupancy Rate</div>
+        <div id="kpi-occupancy" class="text-2xl font-extrabold text-amber-400 mt-1">--%</div>
+        <div class="text-[11px] text-amber-400/80 mt-1"><i class="fa-solid fa-chart-pie"></i> Critical limit: 85%</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Average Stay</div>
+        <div id="kpi-avg-stay" class="text-2xl font-extrabold text-indigo-400 mt-1">-- <span class="text-xs font-normal">days</span></div>
+        <div class="text-[11px] text-indigo-400/80 mt-1"><i class="fa-solid fa-clock"></i> Discharged ALOS</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800/80 p-4 rounded-xl shadow-sm">
+        <div class="text-slate-400 text-xs font-medium uppercase tracking-wider">Maintenance</div>
+        <div id="kpi-maintenance" class="text-2xl font-extrabold text-rose-400 mt-1">--</div>
+        <div class="text-[11px] text-rose-400/80 mt-1"><i class="fa-solid fa-wrench"></i> Blocked beds</div>
+      </div>
+    </section>
+
+    <!-- Row 1: Interactive Bed Matrix + Capacity Donut -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Visual Bed Status Grid Matrix -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl lg:col-span-2 shadow-sm">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
+          <div>
+            <h2 class="text-sm font-bold text-white uppercase tracking-wider">Live Bed Status Matrix</h2>
+            <p class="text-xs text-slate-400">Real-time status of individual hospital units</p>
+          </div>
+          <div class="flex gap-4 text-xs font-medium">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Available</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Occupied</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Maint</span>
+          </div>
+        </div>
+
+        <div id="bedGrid" class="grid grid-cols-4 sm:grid-cols-8 md:grid-cols-12 lg:grid-cols-16 gap-2 max-h-64 overflow-y-auto p-2 custom-scrollbar bg-slate-950/60 rounded-xl border border-slate-800/60">
+          <div class="col-span-full py-8 text-center text-xs text-slate-500">Loading units...</div>
+        </div>
+      </div>
+
+      <!-- Capacity Ratio Doughnut -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl flex flex-col justify-between shadow-sm">
+        <div>
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider">Capacity Distribution</h2>
+          <p class="text-xs text-slate-400">Total hospital bed utilization</p>
+        </div>
+        <div class="relative w-full max-w-[200px] aspect-square mx-auto my-3">
+          <canvas id="occupancyDoughnut"></canvas>
+        </div>
+        <div id="capacityAlert" class="text-xs p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 text-center font-medium">
+          Evaluating bed metrics...
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Row 2: Throughput (Admissions vs Discharges) & Predictive Forecasting -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Patient Throughput -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl shadow-sm">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider mb-1">Patient Inflow vs. Outflow</h2>
+        <p class="text-xs text-slate-400 mb-4">Historical comparison of admissions and discharges</p>
+        <div class="h-64">
+          <canvas id="flowChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Predictive Demand Trend -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl shadow-sm">
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <h2 class="text-sm font-bold text-white uppercase tracking-wider">14-Day Demand Forecast</h2>
+            <p class="text-xs text-slate-400">Anticipated intake run-rate based on linear projection</p>
+          </div>
+          <span class="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[10px] px-2 py-0.5 rounded font-mono">PolyFit Model</span>
+        </div>
+        <div class="h-64">
+          <canvas id="forecastChart"></canvas>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Row 3: Doctor Workload & Top Procedures -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Doctor Workload -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl shadow-sm">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider mb-1">Doctor Active Workload</h2>
+        <p class="text-xs text-slate-400 mb-4">Current patient load distribution across specialists</p>
+        <div class="h-60">
+          <canvas id="doctorChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Top Clinical Treatments -->
+      <div class="bg-slate-900/80 border border-slate-800/80 p-5 rounded-2xl shadow-sm">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider mb-1">High Demand Procedures</h2>
+        <p class="text-xs text-slate-400 mb-4">Most frequently administered medical procedures</p>
+        <div class="h-60">
+          <canvas id="treatmentChart"></canvas>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="border-t border-slate-800 bg-slate-950 py-4 px-6 text-center text-xs text-slate-500">
+    MediCore Hospital BI System • Autonomous Data Warehouse & Resource Intelligence
+  </footer>
+
+  <!-- Application Logic & Charts Script -->
+  <script>
+    let charts = {};
+
+    function clearCharts() {
+      Object.keys(charts).forEach(key => {
+        if (charts[key]) charts[key].destroy();
+      });
+      charts = {};
+    }
+
+    async function loadDashboard() {
+      const dept = document.getElementById("departmentFilter").value;
+      try {
+        const res = await fetch(`/api/advanced-analytics?department=${encodeURIComponent(dept)}`);
+        const data = await res.json();
+
+        // 1. Populate KPI Shelf
+        document.getElementById("kpi-total-patients").innerText = data.kpis.total_patients;
+        document.getElementById("kpi-admitted").innerText = data.kpis.currently_admitted;
+        document.getElementById("kpi-available-beds").innerText = data.kpis.available_beds;
+        document.getElementById("kpi-occupancy").innerText = data.kpis.bed_occupancy_rate + "%";
+        document.getElementById("kpi-avg-stay").innerHTML = `${data.kpis.avg_stay} <span class="text-xs font-normal">days</span>`;
+        document.getElementById("kpi-maintenance").innerText = data.kpis.maintenance_beds;
+
+        // 2. Capacity Assessment Alert
+        const banner = document.getElementById("capacityAlert");
+        if (data.kpis.bed_occupancy_rate > 85) {
+          banner.className = "text-xs p-2.5 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-300 text-center font-medium";
+          banner.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1"></i> Critical Capacity: ${data.kpis.bed_occupancy_rate}% beds occupied. Review pending discharges.`;
+        } else {
+          banner.className = "text-xs p-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-center font-medium";
+          banner.innerHTML = `<i class="fa-solid fa-circle-check mr-1"></i> Stable Operations: Occupancy at ${data.kpis.bed_occupancy_rate}%.`;
+        }
+
+        // 3. Render Visual Bed Matrix
+        const bedGrid = document.getElementById("bedGrid");
+        if (data.bed_matrix && data.bed_matrix.length > 0) {
+          bedGrid.innerHTML = data.bed_matrix.map(b => {
+            let color = "bg-emerald-500/20 border-emerald-500/40 text-emerald-300";
+            if (b.status === "Occupied") color = "bg-rose-500/20 border-rose-500/40 text-rose-300";
+            if (b.status === "Maintenance") color = "bg-amber-500/20 border-amber-500/40 text-amber-300";
+
+            return `
+              <div title="${b.bed_number} (${b.department_name} - ${b.status})" 
+                   class="border ${color} p-2 rounded-lg flex flex-col items-center justify-center text-[10px] font-mono hover:scale-105 transition cursor-default">
+                <span>${b.bed_number}</span>
+              </div>
+            `;
+          }).join("");
+        } else {
+          bedGrid.innerHTML = `<div class="col-span-full py-8 text-center text-xs text-slate-500">No bed units registered for this department.</div>`;
+        }
+
+        clearCharts();
+        initCharts(data);
+
+      } catch (err) {
+        console.error("Dashboard Load Error:", err);
+      }
+    }
+
+    function initCharts(data) {
+      Chart.defaults.color = '#94a3b8';
+      Chart.defaults.borderColor = '#1e293b';
+
+      // Chart 1: Bed Occupancy Doughnut
+      charts.occupancy = new Chart(document.getElementById("occupancyDoughnut"), {
+        type: 'doughnut',
+        data: {
+          labels: ['Occupied', 'Available', 'Maintenance'],
+          datasets: [{
+            data: [data.kpis.occupied_beds, data.kpis.available_beds, data.kpis.maintenance_beds],
+            backgroundColor: ['#f43f5e', '#10b981', '#f59e0b'],
+            borderWidth: 0
+          }]
+        },
+        options: { cutout: '78%', maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      });
+
+      // Chart 2: Admissions vs Discharges Trend
+      charts.flow = new Chart(document.getElementById("flowChart"), {
+        type: 'line',
+        data: {
+          labels: data.inflow_outflow.labels,
+          datasets: [
+            { label: 'Admissions', data: data.inflow_outflow.admissions, borderColor: '#6366f1', backgroundColor: 'rgba(99, 102, 241, 0.1)', fill: true, tension: 0.3 },
+            { label: 'Discharges', data: data.inflow_outflow.discharges, borderColor: '#10b981', backgroundColor: 'transparent', borderDash: [4, 4], tension: 0.3 }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+
+      // Chart 3: Predictive Intake Forecast
+      charts.forecast = new Chart(document.getElementById("forecastChart"), {
+        type: 'line',
+        data: {
+          labels: data.forecast.labels,
+          datasets: [{
+            label: 'Estimated Daily Intake',
+            data: data.forecast.values,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+            fill: true,
+            tension: 0.2,
+            pointBackgroundColor: '#38bdf8'
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+
+      // Chart 4: Doctor Workload Horizontal Bar
+      charts.doctors = new Chart(document.getElementById("doctorChart"), {
+        type: 'bar',
+        data: {
+          labels: data.doctor_workload.doctors,
+          datasets: [{
+            label: 'Active Patients',
+            data: data.doctor_workload.patients,
+            backgroundColor: '#818cf8',
+            borderRadius: 4
+          }]
+        },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      });
+
+      // Chart 5: Procedures Bar
+      charts.treatments = new Chart(document.getElementById("treatmentChart"), {
+        type: 'bar',
+        data: {
+          labels: Object.keys(data.top_treatments),
+          datasets: [{
+            label: 'Procedures Done',
+            data: Object.values(data.top_treatments),
+            backgroundColor: '#c084fc',
+            borderRadius: 4
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+      });
+    }
+
+    // Dataset File Upload Handler
+    async function uploadDataset(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const toast = document.getElementById('uploadToast');
+      const toastContent = document.getElementById('uploadToastContent');
+      const toastMsg = document.getElementById('uploadToastMsg');
+
+      toast.classList.remove('hidden');
+      toastContent.className = "p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 flex justify-between items-center text-xs";
+      toastMsg.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Parsing file and ingesting dataset into warehouse...`;
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await res.json();
+
+        if (result.success) {
+          toastContent.className = "p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 flex justify-between items-center text-xs";
+          toastMsg.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${result.message}`;
+          await loadDashboard();
+        } else {
+          toastContent.className = "p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 flex justify-between items-center text-xs";
+          toastMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${result.message}`;
+        }
+      } catch (err) {
+        toastContent.className = "p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 flex justify-between items-center text-xs";
+        toastMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Communication error with server.`;
+      }
+
+      event.target.value = '';
+    }
+
+    // Client-side Sample CSV Generator
+    function downloadSampleCSV() {
+      const csvContent = "data:text/csv;charset=utf-8," +
+        "name,age,gender,department,doctor,admission_date,discharge_date,status,treatment\n" +
+        "Karan Malhotra,48,Male,Cardiology,Dr. Sunita Mehta,2026-09-10,,Admitted,Cardiac Catheterization\n" +
+        "Ananya Sengupta,29,Female,Neurology,Dr. Farhan Qureshi,2026-09-02,2026-09-08,Discharged,Neurological Workup\n" +
+        "Zaid Merchant,62,Male,ICU,Dr. Arvind Sharma,2026-09-15,,Admitted,IV Fluid Therapy\n" +
+        "Pooja Deshmukh,34,Female,Orthopedics,Dr. Kavita Iyer,2026-09-05,2026-09-12,Discharged,Fracture Reduction\n";
+      
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "sample_hospital_dataset.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Initialize Dashboard On Load
+    window.addEventListener("DOMContentLoaded", loadDashboard);
+  </script>
+</body>
+</html>
