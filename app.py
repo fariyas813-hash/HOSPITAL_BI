@@ -8,9 +8,6 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# ---------------------------------------------------------
-# 1. FLASK APPLICATION INITIALIZATION
-# ---------------------------------------------------------
 app = Flask(__name__)
 CORS(app)
 
@@ -33,14 +30,10 @@ def get_db():
     return conn
 
 
-# ---------------------------------------------------------
-# 2. AUTO-DATABASE SETUP & SEEDING (Self-Healing)
-# ---------------------------------------------------------
 def setup_database_if_empty():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Create tables if not present
     cursor.executescript("""
     CREATE TABLE IF NOT EXISTS departments (
         department_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,12 +96,8 @@ def setup_database_if_empty():
     );
     """)
 
-    # Check if data already exists
     cursor.execute("SELECT COUNT(*) FROM departments")
     if cursor.fetchone()[0] == 0:
-        print("[*] Empty database detected. Seeding realistic sample hospital data...")
-        
-        # 1. Departments
         depts = [
             ("ICU", 30),
             ("Cardiology", 50),
@@ -119,7 +108,6 @@ def setup_database_if_empty():
         ]
         cursor.executemany("INSERT INTO departments (department_name, total_beds) VALUES (?, ?)", depts)
 
-        # 2. Beds
         for dept_id, (_, total) in enumerate(depts, 1):
             for b in range(1, total + 1):
                 cursor.execute(
@@ -127,7 +115,6 @@ def setup_database_if_empty():
                     (f"D{dept_id}-B{b:03d}", dept_id, "Standard")
                 )
 
-        # 3. Doctors
         docs = [
             ("Dr. Arvind Sharma", 1, "Critical Care"),
             ("Dr. Sunita Mehta", 2, "Cardiology"),
@@ -140,13 +127,12 @@ def setup_database_if_empty():
         ]
         cursor.executemany("INSERT INTO doctors (doctor_name, department_id, specialization) VALUES (?, ?, ?)", docs)
 
-        # 4. Historical Patients (Discharged)
         first_names = ["Rahul", "Priya", "Aarav", "Neha", "Ahmed", "Deepak", "Sneha", "Vikram", "Pooja", "Amit"]
         last_names = ["Sharma", "Patel", "Khan", "Verma", "Joshi", "Iyer", "Nair", "Kulkarni", "Singh", "Reddy"]
         treatments_list = ["Cardiac Catheterization", "General Checkup", "Physiotherapy", "Neurological Workup", "IV Fluid Therapy", "Fracture Reduction"]
 
-        base_date = datetime.now() - timedelta(days=90)
-        for _ in range(260):
+        base_date = datetime.now() - timedelta(days=180)
+        for _ in range(450):
             p_name = f"{random.choice(first_names)} {random.choice(last_names)}"
             cursor.execute("INSERT INTO patients (name, age, gender, contact, blood_group) VALUES (?, ?, ?, '9876543210', 'B+')",
                            (p_name, random.randint(10, 80), random.choice(["Male", "Female"])))
@@ -154,7 +140,7 @@ def setup_database_if_empty():
             dept_id = random.randint(1, len(depts))
             doc_id = random.randint(1, len(docs))
             
-            adm_delta = random.randint(0, 75)
+            adm_delta = random.randint(0, 160)
             stay_len = random.randint(2, 9)
             adm_date = (base_date + timedelta(days=adm_delta)).strftime("%Y-%m-%d")
             dis_date = (base_date + timedelta(days=adm_delta + stay_len)).strftime("%Y-%m-%d")
@@ -169,12 +155,11 @@ def setup_database_if_empty():
                 VALUES (?, ?, ?, ?, ?, 'Completed')
             """, (random.choice(treatments_list), pid, doc_id, dept_id, adm_date))
 
-        # 5. Currently Admitted Patients & Bed Statuses
         cursor.execute("SELECT bed_id, department_id FROM beds")
         all_beds = cursor.fetchall()
         for bed_id, dept_id in all_beds:
             roll = random.random()
-            if roll < 0.76:  # Occupied
+            if roll < 0.78:
                 cursor.execute("UPDATE beds SET status = 'Occupied' WHERE bed_id = ?", (bed_id,))
                 p_name = f"{random.choice(first_names)} {random.choice(last_names)}"
                 cursor.execute("INSERT INTO patients (name, age, gender, contact, blood_group) VALUES (?, ?, ?, '9876500000', 'O+')",
@@ -192,32 +177,24 @@ def setup_database_if_empty():
                     INSERT INTO treatments (treatment_name, patient_id, doctor_id, department_id, treatment_date, status)
                     VALUES (?, ?, ?, ?, ?, 'Active')
                 """, (random.choice(treatments_list), pid, doc_id, dept_id, adm_date))
-            elif roll > 0.95:  # Maintenance
+            elif roll > 0.95:
                 cursor.execute("UPDATE beds SET status = 'Maintenance' WHERE bed_id = ?", (bed_id,))
 
         conn.commit()
-        print("[✓] Sample hospital database ready.")
-        
     conn.close()
 
 
-# ---------------------------------------------------------
-# 3. ROUTE: FRONTEND DASHBOARD
-# ---------------------------------------------------------
 @app.route("/")
 def dashboard():
     return render_template("index.html")
 
 
-# ---------------------------------------------------------
-# 4. ROUTE: ADVANCED ANALYTICS API
-# ---------------------------------------------------------
 @app.route("/api/advanced-analytics", methods=["GET"])
 def advanced_analytics():
     conn = get_db()
     dept = request.args.get("department", "All")
+    timeframe = request.args.get("timeframe", "365")
 
-    # Read relevant data
     df_adm = pd.read_sql_query("""
         SELECT a.*, d.department_name, doc.doctor_name, p.age, p.gender, p.name as patient_name
         FROM admissions a
@@ -239,21 +216,32 @@ def advanced_analytics():
     """, conn)
     conn.close()
 
-    # Department filtering
     if dept != "All":
         df_adm = df_adm[df_adm["department_name"] == dept]
         df_beds = df_beds[df_beds["department_name"] == dept]
         df_treatments = df_treatments[df_treatments["department_name"] == dept]
 
-    # KPIs Calculation
+    df_adm["admission_date"] = pd.to_datetime(df_adm["admission_date"])
+    max_date = df_adm["admission_date"].max() if not df_adm.empty else pd.Timestamp.now()
+
+    if timeframe != "all" and not df_adm.empty:
+        days = int(timeframe)
+        start_date = max_date - pd.Timedelta(days=days)
+        df_adm_filtered = df_adm[df_adm["admission_date"] >= start_date].copy()
+    else:
+        df_adm_filtered = df_adm.copy()
+
+    total_historical_patients = int(df_adm_filtered["patient_id"].nunique())
+    total_historical_discharges = int((df_adm_filtered["status"] == "Discharged").sum())
+    currently_admitted = int((df_adm["status"] == "Admitted").sum())
+
     total_beds = len(df_beds)
     occupied_beds = len(df_beds[df_beds["status"] == "Occupied"])
     available_beds = len(df_beds[df_beds["status"] == "Available"])
     maint_beds = len(df_beds[df_beds["status"] == "Maintenance"])
     occupancy_rate = round((occupied_beds / total_beds * 100), 1) if total_beds > 0 else 0
 
-    # ALOS (Average Length of Stay)
-    discharged = df_adm[df_adm["status"] == "Discharged"].copy()
+    discharged = df_adm_filtered[df_adm_filtered["status"] == "Discharged"].copy()
     if not discharged.empty and "discharge_date" in discharged:
         discharged["admission_date"] = pd.to_datetime(discharged["admission_date"])
         discharged["discharge_date"] = pd.to_datetime(discharged["discharge_date"])
@@ -262,10 +250,31 @@ def advanced_analytics():
     else:
         avg_stay = 0.0
 
-    # Predictive Demand Forecast (Linear trend / Polyfit)
-    df_adm["admission_date"] = pd.to_datetime(df_adm["admission_date"])
-    daily_adm = df_adm.set_index("admission_date").resample("D").size().fillna(0)
+    df_adm_filtered["adm_month"] = df_adm_filtered["admission_date"].dt.strftime("%Y-%m")
+    adm_trend = df_adm_filtered.groupby("adm_month").size()
 
+    dis_trend = pd.Series(dtype=int)
+    if not discharged.empty:
+        discharged["dis_month"] = discharged["discharge_date"].dt.strftime("%Y-%m")
+        dis_trend = discharged.groupby("dis_month").size()
+
+    months = sorted(list(set(adm_trend.index).union(set(dis_trend.index))))
+    inflow_outflow = {
+        "labels": months,
+        "admissions": [int(adm_trend.get(m, 0)) for m in months],
+        "discharges": [int(dis_trend.get(m, 0)) for m in months]
+    }
+
+    monthly_occupancy = []
+    for m in months:
+        adm_count = int(adm_trend.get(m, 0))
+        est_occ = min(98.0, round(((adm_count * 5.2) / (total_beds * 30)) * 100, 1)) if total_beds > 0 else 0
+        monthly_occupancy.append(est_occ)
+
+    doctor_workload = df_adm_filtered.groupby("doctor_name").size().reset_index(name="patient_count")
+    doctor_workload = doctor_workload.sort_values(by="patient_count", ascending=False).head(8)
+
+    daily_adm = df_adm.set_index("admission_date").resample("D").size().fillna(0)
     if len(daily_adm) > 5:
         x = np.arange(len(daily_adm))
         y = daily_adm.values
@@ -276,36 +285,24 @@ def advanced_analytics():
     else:
         future_dates, future_y = [], []
 
-    # Active Doctor Workload
-    active_admissions = df_adm[df_adm["status"] == "Admitted"]
-    doctor_workload = active_admissions.groupby("doctor_name").size().reset_index(name="patient_count")
-    doctor_workload = doctor_workload.sort_values(by="patient_count", ascending=False).head(8)
-
-    # Inflow vs Outflow Trends
-    df_adm["adm_month"] = df_adm["admission_date"].dt.strftime("%Y-%m")
-    adm_trend = df_adm.groupby("adm_month").size()
-    dis_trend = discharged.groupby(discharged["discharge_date"].dt.strftime("%Y-%m")).size() if not discharged.empty else pd.Series(dtype=int)
-
-    months = sorted(list(set(adm_trend.index).union(set(dis_trend.index))))
-    inflow_outflow = {
-        "labels": months,
-        "admissions": [int(adm_trend.get(m, 0)) for m in months],
-        "discharges": [int(dis_trend.get(m, 0)) for m in months]
-    }
-
-    # Bed Heatmap Matrix Data (64 beds max for clean responsive grid layout)
     bed_matrix = df_beds[["bed_number", "department_name", "bed_type", "status"]].to_dict(orient="records")
 
     return jsonify({
         "kpis": {
-            "total_patients": int(df_adm["patient_id"].nunique()) if not df_adm.empty else 0,
-            "currently_admitted": int(len(active_admissions)),
+            "total_patients": total_historical_patients,
+            "total_discharges": total_historical_discharges,
+            "currently_admitted": currently_admitted,
             "available_beds": available_beds,
             "occupied_beds": occupied_beds,
             "maintenance_beds": maint_beds,
             "total_beds": total_beds,
             "bed_occupancy_rate": occupancy_rate,
             "avg_stay": avg_stay
+        },
+        "inflow_outflow": inflow_outflow,
+        "historical_occupancy": {
+            "labels": months,
+            "rates": monthly_occupancy
         },
         "forecast": {
             "labels": future_dates,
@@ -315,23 +312,19 @@ def advanced_analytics():
             "doctors": doctor_workload["doctor_name"].tolist() if not doctor_workload.empty else [],
             "patients": doctor_workload["patient_count"].tolist() if not doctor_workload.empty else []
         },
-        "inflow_outflow": inflow_outflow,
         "top_treatments": df_treatments["treatment_name"].value_counts().head(6).to_dict() if not df_treatments.empty else {},
         "bed_matrix": bed_matrix[:64]
     })
 
 
-# ---------------------------------------------------------
-# 5. ROUTE: DATASET FILE UPLOAD (CSV / XLSX)
-# ---------------------------------------------------------
 @app.route("/api/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
-        return jsonify({"success": False, "message": "No file part in request"}), 400
+        return jsonify({"success": False, "message": "No file part"}), 400
 
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"success": False, "message": "Empty file selected"}), 400
+        return jsonify({"success": False, "message": "No file selected"}), 400
 
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
@@ -345,46 +338,29 @@ def upload_file():
                 df_upload = pd.read_excel(filepath)
 
             df_upload.columns = df_upload.columns.str.strip().str.lower()
-
             required_cols = {"name", "age", "gender", "department", "doctor", "admission_date", "status"}
             if not required_cols.issubset(set(df_upload.columns)):
-                return jsonify({
-                    "success": False,
-                    "message": f"Format invalid! Required columns: {', '.join(required_cols)}"
-                }), 400
+                return jsonify({"success": False, "message": f"Required columns: {', '.join(required_cols)}"}), 400
 
             conn = get_db()
             cursor = conn.cursor()
 
             imported_count = 0
             for _, row in df_upload.iterrows():
-                # Department resolve/insert
                 cursor.execute("SELECT department_id FROM departments WHERE department_name = ?", (str(row["department"]),))
                 dept = cursor.fetchone()
-                if dept:
-                    dept_id = dept["department_id"]
-                else:
-                    cursor.execute("INSERT INTO departments (department_name, total_beds) VALUES (?, 30)", (str(row["department"]),))
-                    dept_id = cursor.lastrowid
+                dept_id = dept["department_id"] if dept else 1
 
-                # Doctor resolve/insert
                 cursor.execute("SELECT doctor_id FROM doctors WHERE doctor_name = ?", (str(row["doctor"]),))
                 doc = cursor.fetchone()
-                if doc:
-                    doc_id = doc["doctor_id"]
-                else:
-                    cursor.execute("INSERT INTO doctors (doctor_name, department_id, specialization) VALUES (?, ?, 'General')", 
-                                   (str(row["doctor"]), dept_id))
-                    doc_id = cursor.lastrowid
+                doc_id = doc["doctor_id"] if doc else 1
 
-                # Patient insert
                 cursor.execute(
                     "INSERT INTO patients (name, age, gender, contact, blood_group) VALUES (?, ?, ?, ?, ?)",
                     (str(row["name"]), int(row["age"]), str(row["gender"]), str(row.get("contact", "9876543210")), str(row.get("blood_group", "O+")))
                 )
                 patient_id = cursor.lastrowid
 
-                # Admission record
                 dis_date = str(row["discharge_date"]) if pd.notna(row.get("discharge_date")) and str(row.get("discharge_date")).strip() != "" else None
                 status = str(row["status"]).capitalize()
 
@@ -393,7 +369,6 @@ def upload_file():
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (patient_id, dept_id, doc_id, str(row["admission_date"]), dis_date, status))
 
-                # Treatment record
                 treatment_name = str(row.get("treatment", "General Consultation"))
                 cursor.execute("""
                     INSERT INTO treatments (treatment_name, patient_id, doctor_id, department_id, treatment_date, status)
@@ -405,14 +380,10 @@ def upload_file():
             conn.commit()
             conn.close()
 
-            # Clean up uploaded file
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-            return jsonify({
-                "success": True,
-                "message": f"{imported_count} records imported into database successfully!"
-            })
+            return jsonify({"success": True, "message": f"{imported_count} records successfully imported!"})
 
         except Exception as e:
             return jsonify({"success": False, "message": f"Parsing Error: {str(e)}"}), 500
@@ -420,10 +391,7 @@ def upload_file():
     return jsonify({"success": False, "message": "Allowed formats: CSV, XLSX"}), 400
 
 
-# ---------------------------------------------------------
-# 6. APP RUNNER
-# ---------------------------------------------------------
+setup_database_if_empty()
+
 if __name__ == "__main__":
-    setup_database_if_empty()
-    print("\n🚀 MediCore BI Server running at: http://127.0.0.1:5000\n")
     app.run(debug=True, port=5000)
